@@ -5,7 +5,7 @@ const productSchema = new Schema(
   {
     title: { type: String, required: true },
     category: { type: String, required: true },
-    decription: { type: String },
+    description: { type: String },
     sizes: { type: String, enum: ["XL", "L", "M", "S", "XS"] },
     price: { type: Number, required: true },
     rating: { type: String },

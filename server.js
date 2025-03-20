@@ -7,13 +7,17 @@ import userRoutes from "./routes/userRoutes.js";
 import orderRoutes from "./routes/orderRoutes.js";
 import { auth } from "./middlewares.js/authentication.js";
 import { Stripe } from "stripe";
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
-import cors from "cors";
+/* import cors from "cors"; */
 import ImageModel from "./models/imageSchema.js";
 import { Readable } from "stream";
 import cookieParser from "cookie-parser";
 
-const PORT = 5000;
+
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+
+
+
+const PORT = 5001;
 
 //make a mongoose connection
 try {
@@ -27,11 +31,48 @@ try {
 const app = express();
 
 //cors middleware
-/* app.use(cors({ origin: "http://localhost:5000", credentials:true })); */
+/* app.use(cors({ origin: "http://localhost:5001", credentials:true })); */
 /* app.use(cors({ origin: "http://localhost:5173", credentials: true })); */ //We replaced it with express.static
 
 app.use(express.static("views"))
-
+const endpointSecret = process.env.SIGNING_SECRET;
+app.post('/webhook', express.raw({ type: 'application/json' }), async (request, response) => {
+    const sig = request.headers['stripe-signature'];
+    console.log("webhook is working!")
+    let event;
+    try {
+        event = stripe.webhooks.constructEvent(request.body, sig, endpointSecret);
+    } catch (err) {
+        response.status(400).send(`Webhook Error: ${err.message}`);
+        return;
+    }
+    // Handle the event
+    switch (event.type) {
+        case 'checkout.session.completed':
+            const session = event.data.object;
+            console.log(session)
+            //ADD DATA TO DB...
+            //converting string meta data to object form
+            const products = session.metadata?.productIds
+                .split(",")
+                .map(id => new mongoose.Types.ObjectId(id));
+            const userId = new mongoose.Types.ObjectId(session.metadata?.userId);
+            const totalPrice = parseInt(session.amount_total.toFixed(2))
+            const order = await OrderModel.create({
+                userId,
+                products,
+                totalPrice
+            })
+            console.log(order)
+            // Then define and call a function to handle the event checkout.session.completed
+            session.break;
+        // ... handle other event types
+        default:
+            console.log(`Unhandled event type ${event.type}`);
+    }
+    // Return a 200 response to acknowledge receipt of the event
+    response.send();
+});
 //json middleware
 app.use(express.json()); // parse any incoming json data and store in req.body
 
@@ -39,7 +80,7 @@ app.use(express.json()); // parse any incoming json data and store in req.body
 //cookie parser middleware (it will parse your header and give cookies data in req.cookies)
 app.use(cookieParser())
 
-app.post("/create-checkout-session", async (req, res) => {
+app.post("/create-checkout-session", auth, async (req, res) => {
   const { carts } = req.body;
   const session = await stripe.checkout.sessions.create({
     line_items: carts.map((item) => {
